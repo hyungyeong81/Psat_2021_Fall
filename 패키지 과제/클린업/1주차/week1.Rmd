@@ -1,0 +1,432 @@
+---
+title: "2019313106 홍현경 1주차 패키지"
+author: "Hyungyeong Hong"
+date: "9/5/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Ch 1. 전처리
+
+# 문제0. 기본 세팅
+
+* 디렉토리 설정
+```{r}
+setwd("/Users/hyungyeonghong/Desktop/week1_package")
+```
+
+* 패키지 불러오기
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(magrittr)
+library(data.table)
+library(ggpubr)
+library(corrplot)
+library(caret)
+library(Metrics)
+```
+
+# 데이터 불러오기
+```{r}
+cus_info <- fread("cus_info.csv",
+                  header=TRUE, 
+                  data.table = FALSE,
+                  stringsAsFactors = FALSE,
+                  na.strings = c("_", "-"))
+
+act_info <- fread("act_info.csv",
+                  header=TRUE,
+                  data.table = FALSE,
+                  stringsAsFactors = FALSE)
+```
+
+
+# 문제1. 데이터의 기본 구조 파악하기
+
+## (1) cus_info 데이터 확인
+
+### (1)-1. head()를 이용하여 cus_info 데이터 확인: 맨 처음의 10개 row만 뽑아서 확인
+```{r}
+cus_info %>% head(10)
+```
+
+### (1)-2 tail()을 이용하여 cus_info 데이터 확인: 맨 마지막의 10개 row만 뽑아서 확인
+```{r}
+cus_info %>% tail(10)
+```
+
+### (1)-3. str()을 이용하여 cus_info 데이터의 구조(structure) 확인: row, column수와 column의 이름 및 형식, 일부 값 확인
+```{r}
+cus_info %>% str
+```
+
+### (1)-4. glimpse()를 이용하여 cus_info 데이터의 row, column수와 column의 이름 및 형식, 일부 값 확인
+```{r}
+cus_info %>% glimpse
+```
+
+### (1)-5. summary()를 이용하여 cus_info 데이터에 포함된 수치형 변수의 중심측도와 NA값 개수 확인
+```{r}
+cus_info %>% summary
+```
+
+## (2) act_info 데이터 확인
+
+### (2)-1. head()를 이용하여 act_info 데이터 확인: 맨 처음의 10개 row만 뽑아서 확인
+```{r}
+act_info %>% head(10)
+```
+
+### (2)-2 tail()을 이용하여 act_info 데이터 확인: 맨 마지막의 10개 row만 뽑아서 확인
+```{r}
+act_info %>% tail(10)
+```
+
+### (2)-3. str()을 이용하여 act_info 데이터의 구조(structure) 확인: row, column수와 column의 이름 및 형식, 일부 값 확인
+```{r}
+act_info %>% str
+```
+
+### (2)-4. glimpse()를 이용하여 act_info 데이터의 row, column수와 column의 이름 및 형식, 일부 값 확인
+```{r}
+act_info %>% glimpse
+```
+
+### (2)-5. summary()를 이용하여 acr_info 데이터에 포함된 수치형 변수의 중심측도와 NA값 개수 확인
+```{r}
+act_info %>% summary
+```
+
+# 문제2. 각 열별로 결측치의 개수를 확인한 후 결측치가 70% 이상인 열 삭제
+
+## 2-(1) cus_info 데이터 결측치 처리
+* 각 열별로 결측치의 비율 확인
+```{r}
+apply(cus_info, 2, is.na) %>% colSums %>% divide_by(10000)
+```
+
+* 결측치의 비율이 약 43%인 ivs_icn_cd 열 삭제
+```{r}
+cus_info$ivs_icn_cd <- NULL
+```
+
+## 2-(2) act_info 데이터 결측치 처리
+* act_info 데이터에는 결측치가 존재하지 않음
+```{r}
+apply(act_info, 2, is.na) %>% colSums %>% divide_by(10000)
+```
+
+# 문제3. 각 열마다 unique한 값의 개수 확인
+
+## 3-(1) cus_info 데이터 각 열의 unique 개수 확인
+```{r}
+apply(cus_info, 2, n_distinct)
+```
+
+## 3-(2) act_info 데이터 각 열의 unique 개수 확인
+```{r}
+apply(act_info, 2, n_distinct)
+```
+
+# 문제 4. act_info에서 act_opn_ym의 unique 값 확인 후 이상치가 존재하는 행 삭제
+* yyyy-mm의 형태로 표현이 되어야 하는데 0이 존재함
+```{r}
+act_info$act_opn_ym %>% unique %>% sort
+```
+
+* 이는 이상치이므로 act_opn_ym의 값이 0인 친구들의 인덱스를 뽑아서 해당 행을 삭제함
+```{r}
+idx <- which(act_info$act_opn_ym == 0)
+act_info <- act_info[-idx, ]
+```
+
+# 문제 5. act_info에서 act_opn_ym 변수를 년, 월로 분리
+```{r}
+act_info$act_opn_ym <- as.character(act_info$act_opn_ym)
+act_info <- act_info %>% separate(act_opn_ym, c("act_opn_yy", "act_opn_mm"), 4)
+act_info$act_opn_yy <- as.factor(act_info$act_opn_yy)
+act_info$act_opn_mm <- as.factor(act_info$act_opn_mm)
+```
+
+# 문제 6. cus_info에서 범주형 변수인데 수치형으로 읽힌 경우 mutate_if를 통해 범주형 변수로 변경
+* 뒤에서 rename을 이용하여 값을 character형으로 다시 부여해주어야 하기 때문에 character형으로 변환하였음
+```{r}
+cus_info <- cus_info %>% mutate_at("cus_age", as.character)
+```
+
+# 문제 7. cus_info에서 cus_age 변수를 10세 기준으로 재범주화
+* plyr 패키지의 경우 library()를 이용하여 불러오게 되면 dplyr 패키지와 충돌을 일으킴
+* 따라서 plyr::function()의 형태로 필요한 함수만 불러옴
+```{r}
+cus_info$cus_age <- cus_info$cus_age %>% plyr::revalue(c("0" = "10s", "20" = "20s", "25" = "20s", "30" = "30s", "35" = "30s", "40" = "40s", "45" = "40s", "50" = "50s", "55" = "50s", "60" = "60s", "65" = "60s", "70" = "70s"))
+cus_info
+```
+
+# 문제 8. 데이터 레이블 변경
+
+## 8-(1). 성별 데이터 레이블 변경
+* ifelse()를 이용하여 해당 함수 안의 조건문이 참이면 M, 거짓이면 F값을 부여함
+```{r}
+cus_info$sex_dit_cd <- ifelse(cus_info$sex_dit_cd == 1, "M", "F")
+```
+
+## 8-(2). 주소 데이터 레이블 변경
+```{r}
+cus_info$zip_ctp_cd <- as.character(cus_info$zip_ctp_cd) %>% 
+  plyr::revalue(c("41" = "경기", "11" = "서울", "48" = "경남", "26" = "부산", "27" = "대구", "47" = "경북", "28" = "인천", "44" = "충남", "46" = "전남", "30" = "대전", "29" = "광주", "43" = "충북", "45" = "전북", "42" = "강원", "31" ="울산", "50" = "제주", "36" = "세종"))
+```
+
+# 문제 9. cus_id를 제외한 모든 변수들을 factor 형태로 변환
+* str()을 이용하여 변환 후 데이터의 구조를 확인해 줌
+```{r}
+cus_info <- cus_info %>% mutate(sex_dit_cd = as.factor(sex_dit_cd), 
+                    cus_age = as.factor(cus_age), 
+                    zip_ctp_cd = as.factor(zip_ctp_cd), 
+                    tco_cus_grd_cd = as.factor(tco_cus_grd_cd))
+cus_info %>% str
+```
+
+# 문제 10. 문제 4번의 결과를 바탕으로 두 데이터셋 병합 후 data로 저장, 이전 데이터셋은 삭제
+* 두 데이터셋의 공통 열인 cus_info를 기준으로 병합해 줌
+```{r}
+data <- full_join(act_info, cus_info, by = "cus_id")
+cus_info <- NULL
+act_info <- NULL
+```
+
+# 문제 11. cus_age를 기준으로 그룹화하여 고객 수, 계좌 수, 1인당 평균 계좌 수 파생변수 생성
+* cus_id와 act_id는 모두 고유값이므로 unique %>% length의 형태를 사용하여 수를 count
+```{r}
+account_cnt <- data %>% 
+  group_by(cus_age) %>% 
+  summarise(cus_cnt = length(unique(cus_id)), 
+            act_cnt = length(unique(act_id))) %>% 
+  mutate(mean_acc_cnt = act_cnt / cus_cnt)
+
+account_cnt
+```
+
+# Ch2. 시각화
+
+# 문제 1. Bar Graph
+
+## 1-(1). 변수별 결측치의 개수와 비율 시각화
+* 변수별 결측치의 개수와 비율에 대한 데이터프레임 생성
+```{r}
+na_df <- data %>% lapply(is.na) %>% sapply(sum) %>% sort(decreasing = TRUE) %>% as.data.frame() %>% rename("na_cnt" = ".") %>% 
+  mutate(na_percentage = paste0(round(na_cnt / nrow(data), 4) * 100, "%"))
+
+na_df <- na_df %>% mutate(var_names = rownames(na_df))
+
+rownames(na_df) <- NULL
+
+na_df
+```
+
+* Bar Graph 시각화
+```{r}
+na_df %>% ggplot() +
+  geom_bar(aes(x = reorder(var_names, -na_cnt), y = na_cnt, fill = reorder(var_names, -na_cnt)), stat = "identity", alpha = 0.7) +
+  geom_text(aes(x = reorder(var_names, -na_cnt), y = na_cnt/2, label = na_percentage))+
+  theme_light() + 
+  scale_fill_manual(values = c("blue", "skyblue", rep("NA", 6))) +
+  ggtitle("변수별 결측치 개수 및 비율") +
+  xlab("변수") +
+  ylab("결측치 개수") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 20, face = "bold")
+  )
+```
+
+## 1-(2). 연령대별 2020년 신규 개설 계좌 비율 시각화
+* ifelse()를 이용하여 계좌 개설 년도가 2020년인지 구분하는 파생변수 생성
+```{r}
+data$act_2020 <- as.factor(ifelse(data$act_opn_yy == "2020", "2020년 개설", "2020년 이전 개설"))
+```
+
+* Bar Graph 시각화
+```{r}
+data$act_2020 <- factor(data$act_2020, levels = c("2020년 이전 개설", "2020년 개설"))
+
+left_join(data %>% group_by(cus_age, act_2020) %>% summarise(act_2020_count = n()) %>% group_by(cus_age),
+data %>% group_by(cus_age) %>% summarise(age_count = n()), by = "cus_age") %>% 
+  ggplot(aes(x = cus_age, y = act_2020_count / age_count, group = act_2020, fill = act_2020)) +
+  geom_bar(stat = "identity") +
+  theme_grey() + 
+  scale_fill_brewer(palette = "RdPu") +
+  ggtitle("연령대별 2020년 신규개설 계좌 비율") + 
+  xlab("연령대") + 
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    axis.title.y = element_blank(),
+    plot.title = element_text(size = 20, face = "bold")
+  )
+```
+
+# 문제 2. Line Graph (Time Series Graph)
+```{r}
+plt1 <- data %>% group_by(act_opn_yy, cus_age) %>% summarise(count = n()) %>% 
+  ggplot(aes(x = act_opn_yy, y = count, group = cus_age, color = cus_age)) +
+  geom_line() +
+  geom_point() +
+  theme_light() + 
+  scale_x_discrete(breaks = c(1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020)) +
+  scale_color_discrete(name = "연령대") +
+  ggtitle(label = "연도별 신규계좌 수", subtitle = "연도별로 새롭게 개설된 신규 계좌 수를 연령대별로 표현한 그래프") +
+  xlab("연도") +
+  ylab("신규계좌 수") +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 15, face = "italic"),
+    legend.text = element_text(face = "italic")
+  )
+```
+
+```{r}
+plt2 <- data %>% filter(act_opn_yy == "2020") %>% 
+  group_by(act_opn_mm, cus_age, sex_dit_cd) %>% summarise(count = n()) %>% 
+  ggplot(aes(x = act_opn_mm, y = count, group = cus_age, color = cus_age)) +
+  geom_line() +
+  geom_point() +
+  theme_grey() +
+  facet_wrap(facets=vars(sex_dit_cd)) +
+  ggtitle(label = "2020년 월별 신규 계좌 수", subtitle = "고객 성별 연령별 2020년 월별 신규개설 계좌 수 추이") +
+  scale_x_discrete(labels = c("01" = "1월", "02" = "2월", "03" = "3월", "04" = "4월", "05" = "5월", "06" = "6월",
+                              "07" = "7월", "08" = "8월", "09" = "9월", "10" = "10월", "11" = "11월", "12" = "12월")) +
+  scale_color_discrete(name = "연령대") +
+  ylab("개설된 계좌 수") +
+  theme(
+    strip.background = element_rect(fill = "white", color = "grey"),
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 15, face = "italic"),
+    axis.title.x = element_blank(),
+    legend.text = element_text(face = "italic")
+  )
+```
+
+```{r, warning = FALSE}
+ggarrange(plt1, plt2, ncol=1, nrow=2, common.legend = TRUE, legend="right")
+```
+
+# 문제 3. Bar Graph + Line Graph
+* 300을 곱해주지 않을 경우 y축의 sclae이 맞지 않아 line graph의 형태를 파악하기 어렵다
+```{r fig.width=10}
+account_cnt %>%
+  ggplot() +
+  geom_bar(aes(x = cus_age, y = cus_cnt, fill = cus_age, color = cus_age), stat = "identity", alpha = 0.4, cex = 0.3) +
+  geom_line(aes(x = cus_age, y = mean_acc_cnt * 300), group = 1, linetype = "dashed") +
+  geom_point(aes(x = cus_age, y = mean_acc_cnt * 300, fill = cus_age), shape = 22, size = 3) +
+  geom_text(aes(x = cus_age, y = mean_acc_cnt * 300 + 150, 
+                label = paste(as.character(round(mean_acc_cnt, 2)), "개") %>% str_remove(" "))) +
+  theme_light() + 
+  ggtitle(label = "연령대별 고객 분포와 평균 계좌 개수",
+          subtitle = "연령대별 계좌 개수를 고객 수로 나누어 1인당 평균 계좌 개수를 구하여 연령대별 고객 분포와 함께 표현했습니다.") +
+  xlab("연령대") +
+  ylab("고객 수") +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 15, face = "italic"),
+    legend.position = "none"
+  )
+```
+
+# 문제 4. Scatter Plot & Box Plot
+* 환경에 저장된 데이터를 모두 삭제하고 carData 패키지의 Salaries 데이터셋 불러오기
+```{r}
+rm(list=ls()) # 환경에 저장된 데이터 모두 삭제
+data(Salaries, package="carData") # Salaries 데이터셋 불러오기
+```
+
+* 불러온 데이터 확인
+```{r}
+Salaries
+```
+## 4-(1). Salaries 데이터셋으로 scatter plot 시각화
+```{r}
+Salaries %>% ggplot(aes(x = yrs.since.phd, y = salary, group = discipline, color = discipline, shape = discipline)) +
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_manual(values = c("#00BE6C", "#F8766D")) +
+  theme_minimal()
+```
+
+## 4-(2). Salaries 데이터셋으로 box plot 시각화
+```{r}
+Salaries %>% ggplot(aes(x = rank, y = salary, color = rank)) +
+  geom_boxplot(outlier.shape = 1, outlier.size = 2, cex = 0.7) +
+  geom_jitter(alpha = 0.5, width = 0.2) +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    legend.position = "none"
+  )
+```
+
+# Chapter3. 회귀분석
+
+# 문제 1. Salaries 데이터의 수치형 변수만을 이용하여 상관계수 플랏을 그리고 간단히 해석
+* symmetric이므로 upper triangular 부분 또는 lower triangular 부분만 보면 ~
+* yrs.since.phd와 yrs.service 변수 사이에는 강한 양의 상관관계가 존재함
+* 각 변수 사이에 음의 상관관계는 존재하지 않으며, 모두 양의 상관관계를 보임
+* 그러나 yrs.since.phd와 yrs.service에 비하면 모두 약한 양의 상관관계를 보임
+```{r}
+idx <- Salaries %>% sapply(is.numeric) # 수치형 변수의 column index
+cor(Salaries[,idx]) %>% corrplot(method = "color", diag = FALSE, addCoef.col = "black", tl.pos = "d", tl.col = "black")
+```
+
+# 문제 2. two sample t-test (two-sided)
+* H0: 성별에 따른 salary의 평균은 다르지 않다.
+* H1: 성별에 따른 salary의 평균에는 차이가 존재한다.
+* alpha = 0.05에서 p-value값이 0.00266으로 0.05보다 작기 떄문에 귀무가설을 기각한다.
+* 따라서, 성별에 따라 salary의 평균에 유의미한 차이가 존재한다.
+```{r}
+male <- Salaries %>% filter(sex == "Male")
+female <- Salaries %>% filter(sex == "Female")
+
+# t-test 시행
+t.test(male$salary, female$salary, paired = FALSE, alternative = "two.sided")
+```
+
+# 문제 3. 데이터를 7:3 비울로 train/test 분리
+```{r}
+set.seed(2728)
+train_idx <- createDataPartition(Salaries$salary, p = 0.7, list = FALSE)
+train <- Salaries[train_idx, ]
+test <- Salaries[-train_idx, ]
+```
+
+# 문제 4. train 데이터를 이용하여 salary를 종속변수, 나머지 변수들을 독입변수로 하는 회귀 모형을 만든 후 결과 간단히 해석
+* F-test의 p-value < 2.2e-16이므로 모든 회귀계수가 0이라는 귀무가설을 기각한다.
+* t-test의 p-value를 통해 rankAssocProf, rankProf, disciplineB변수의 경우 타 변수들이 모두 적합되어 있을 때 해당 변수를 추가적으로 적합시키면 회귀식의 설명력이 통계적으로 유의미하게 증가함을 확인할 수 있다.
+* t-test의 p-value 값이 높아 통계적으로 유의하지 않다고 나온 변수들은 실제로 y값과 관계가 없는지는 알 수 없다. 위의 상관관계 플랏에서 알 수 있듯이 변수간 다중공산성 문제가 발생하기 때문이다.
+* Multiple R-squared의 값은 0.4553, 변수의 개수에 대한 보정이 이루어진 Adjusted R-squared의 값은 0.4433으로 회귀식의 설명력이 높지는 않은 것을 알 수 있다.
+* discipline, rank, sex변수가 범주형 독립변수에 해당한다.
+* 범주형 독립변수가 가지는 회귀계수의 경우 해당 변수의 baseline category와의 값 차이로 해석 가능하다.
+```{r}
+lm_fit <- lm(salary ~., data = train)
+summary(lm_fit)
+```
+
+* 회귀모형의 성능을 평가할 수 있는 지표로는 RMSE, MSE, MAE, R squared 등이 있다.
+* MSE는 실제 값과 회귀식을 통해 예측한 값의 차를 제곱하여 평균낸 것이다. 여기에서 S는 Squared!
+* RMSE는 MSE에 루트를 씌운 것이다! 여기에서 R은 Root!
+* MAE는 실제 값과 회귀식을 통해 예측한 값의 차에 절댓값을 씌운 후 평균낸 것이다. 여기에서 A는 Absolute!
+* R squared는 총 변동에서 회귀식이 설명하는 부분을 나타낸다. 회귀식의 설명력을 나타내게 되는데, 여기에서 변수의 개수가 증가하게 되면 회귀식의 설명력은 증가할 수 밖에 없다. 따라서, Adjusted R squared 값을 이용하면 변수의 개수가 다른 두 회귀식의 설명력을 비교할 수 있다! (Adjusted )R squared 값이 1에 가까울수록 좋은 회귀식이라고 할 수 있겠다!
+
+```{r}
+train_RMSE <- mean((train$salary - lm_fit$fitted.values)^2) %>% sqrt
+train_RMSE
+```
+
+```{r}
+pred <- lm_fit %>% predict(test)
+
+data.frame(RMSE = RMSE(pred, test$salary),
+           R2 = R2(pred, test$salary),
+          MAE = MAE(pred, test$salary))
+```
+* training RMSE보다 test RMSE가 더 높은 것을 확인할 수 있다.
+* 변수 선택을 통해 다중공산성 문제를 해결한 후 다시 모델링을 해서 성능을 높여보는 것도 시도해보면 좋을 것 같다!
