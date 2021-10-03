@@ -1,0 +1,632 @@
+---
+title: "week3"
+author: "Hyungyeong Hong"
+date: "9/27/2021"
+output: html_document
+---
+
+# Ch1. 모델링을 위한 전처리
+
+##문제 0. 기본 세팅
+
+### (1) 패키지 불러오기
+
+```{r, message = FALSE}
+library(tidyverse)
+library(data.table)
+library(magrittr)
+library(caret)
+```
+
+### (2) 디렉토리 설정
+
+```{r}
+setwd("/Users/hyungyeonghong/Desktop/week3_package")
+```
+
+### (3) 데이터 불러오기
+
+```{r}
+train <- fread("train.csv")
+test <- fread("test.csv")
+```
+
+
+## 문제 1. train.csv, test.csv 살펴보기
+
+### (1) train.csv
+
+* 데이터 기본 구조 파악
+```{r}
+train %>% str
+```
+
+* 결측치 여부 파악
+```{r}
+train %>% apply(2, is.na) %>% colSums
+```
+
+###(2) test.csv
+
+* 데이터 기본 구조 파악
+```{r}
+test %>% str
+```
+
+* 결측치 여부 파악
+```{r}
+test %>% apply(2, is.na) %>% colSums
+```
+
+
+## 문제 2. character 변수를 factor로 변환
+
+```{r}
+train <- train %>% mutate_if(is.character, as.factor)
+```
+
+## 문제 3. 변수 의미 파악 후 남은 범주형 변수들도 factor로 변환, 구조 확인
+
+* 앞에서 character -> factor 변환한 후의 구조 확인
+```{r}
+train %>% str
+```
+
+* 범주형 변수 factor 변환: flag_mobil, work_phone, phone, email, credit
+```{r}
+train <- train %>% 
+  mutate_at(vars(FLAG_MOBIL, work_phone, phone, email, credit), as.factor)
+```
+
+* 범주형 변수 factor 변환 후의 구조 확인
+```{r}
+train %>% str
+```
+
+## 문제 4. factor 변수들의 각 level 개수 확인 및 시각화
+
+### (1) factor 각 level 개수를 데이터프레임으로 만들기
+
+```{r}
+ftr_df <- train %>% 
+  select_if(is.factor) %>% 
+  select(-credit) %>%  # credit 변수는 타겟 변수이고, 문제에 제시된 플랏에는 포함시카지 않았으므로 제거
+  summarise_all(n_distinct) %>%
+  t %>% 
+  as.data.frame %>% 
+  rename("levels" = "V1"); ftr_df
+```
+
+### (2) 시각화
+
+```{r}
+ftr_df %>% 
+  ggplot(aes(x = reorder(row.names(ftr_df), levels), y = levels, fill = levels, color = levels)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(levels, "개"), hjust = -0.3)) +
+  theme_classic() +
+  coord_flip() +
+  scale_fill_gradient(high = "#480048", low = "#C04848", guide = "colourbar", aesthetics = "fill") +
+  scale_color_gradient(high = "#480048", low = "#C04848", guide = "colourbar", aesthetics = "color") +
+  xlab("범주형 변수") +
+  ylab("level 개수") +
+  theme(
+    legend.position = "none"
+  )
+  
+```
+
+## 문제 4-1. 필요 없는 변수 삭제
+
+* FLAG_MOBIL은 level이 1개이므로 지워준다.
+```{r}
+train$FLAG_MOBIL <- NULL
+```
+
+## 문제 5. 나이(AGE) 파생변수 생성
+
+```{r}
+train$AGE <- -(train$DAYS_BIRTH) %>% divide_by(365) %>% round
+train$DAYS_BIRTH <- NULL
+```
+
+## 문제 6. 업무 년차(YEARS_EMPLOYED) 파생변수 생성
+
+```{r}
+train$YEARS_EMPLOYED <- -(train$DAYS_EMPLOYED) %>% divide_by(365)
+train$DAYS_EMPLOYED <- NULL
+```
+
+## 문제 7. test 데이터도 같은 방식으로 전처리
+
+```{r}
+test
+test <- test %>% mutate_if(is.character, as.factor)
+
+test <- test %>% 
+  mutate_at(vars(FLAG_MOBIL, work_phone, phone, email), as.factor)
+
+test$FLAG_MOBIL <- NULL
+
+test$AGE <- -(test$DAYS_BIRTH) %>% divide_by(365) %>% round
+test$DAYS_BIRTH <- NULL
+
+test$YEARS_EMPLOYED <- -(test$DAYS_EMPLOYED) %>% divide_by(365)
+test$DAYS_EMPLOYED <- NULL
+```
+
+## 문제 8. train 데이터를 학습용 데이터와 검증용 데이터로 분리
+```{r}
+set.seed(123)
+train_idx <- createDataPartition(train$credit, p = 0.8, list = FALSE)
+train_set <- train[train_idx, ]
+valid_set <- train[-train_idx, ]
+```
+
+# Ch2. 분류보델: 로지스틱 회귀
+
+```{r, message = FALSE}
+library(glmnet)
+library(Epi)
+library(MLmetrics)
+```
+
+## 로지스틱 회귀
+
+## 문제 1-1. 전체 변수를 이용한 로지스틱 회귀 모델
+
+```{r}
+logit_model <- glm(credit ~ ., family = binomial(link='logit'), data = train_set)
+summary(logit_model)
+```
+
+## 문제 1-2. 변수선택법 적용
+
+* Stepwise Selection
+```{r}
+stepwise_result <- step(logit_model, direction = "both")
+```
+
+* Forward Selection
+```{r}
+forward_result <- step(logit_model, direction = "forward")
+```
+
+* Backward Selection
+```{r}
+backward_result <- step(logit_model, direction = "backward")
+```
+
+* 변수선택법 적용 결과: Stepwise Seleciton, Forward Selection, Backward Selection을 모두 시행하여 각 방법의 가장 작은 AIC값을 확인하였다. Best Subset Selection을 사용한다면 가능한 모든 변수들의 조합을 고려하여 최적의 모델을 찾을 수 있겠지만, 이 방법은 연산량이 매우 많기 때문에 Stepwise Selection, Forward Selection, Backward Selection을 고려하였다. Forward Selection은 변수를 추가할 때 모든 조합을 고려하지 않고, null model에서 시작하여 AIC(또는 BIC)의 감소 여부에 따라 변수의 추가 여부를 결정하므로 최적의 모델을 찾아낸다고 하기는 어렵지만 연산량이 비교적 적다는 단점이 있다. Backward Selection 역시 AIC(또는 BIC)의 감소 여부를 판단하지만, Forward Selection과는 달리 Full Model에서 시작하여 변수를 하나씩 제거해나간다는 특징이 있다. 역시 모든 조합을 고려하지 않으므로 최적의 모델을 찾아낸다고 하기는 어렵다. Stepwise Selection은 Forward Selection과 Backward Selection의 방법을 혼합한 것이기 때문에 조금 더 유연하다는 장점이 있다. 그러나 역시 변수의 모든 조합을 구하지 않으므로 최적의 모델을 찾아낸다고 하기는 어렵다. 변수 개수도 많고, 데이터의 수도 많은 편이기 때문에 계산의 효율성 측면에서 Best Subset Selection을 사용하지 않았다. Stepwise Selection, Forward Selection, Backward Selection의 경우 최적의 모델이 아닐 수도 있다는 단점이 존재하기 때문에 세 가지 방법을 모두 사용하여 가장 나은 결과를 내는 모델을 선정하기 위해 세 가지 방법에서 도출된 모델들 중에서 최소의 AIC를 갖는 모델을 선정하였다.
+
+## 문제 1-3. 모델 회귀계수의 신뢰구간
+
+### (1) 변수선택법으로 구한 모델 적합
+
+```{r}
+logit_model <- glm(credit ~ reality + income_total + income_type + edu_type + family_type + house_type + email + begin_month + AGE + YEARS_EMPLOYED, 
+                   family = binomial(link='logit'), 
+                   data = train_set)
+
+logit_model_summary <- summary(logit_model); logit_model_summary
+```
+
+### (2) 회귀계수의 신뢰구간: 직접 계산한 CI
+
+```{r}
+lower_bound <- logit_model_summary$coefficients[,1] - 1.96 * logit_model_summary$coefficients[,2]
+upper_bound <- logit_model_summary$coefficients[,1] + 1.96 * logit_model_summary$coefficients[,2]
+cbind(lower_bound, upper_bound)
+```
+
+## 문제 1-4. 오즈비와 회귀계수의 관계를 이용하여 회귀계수 해석
+
+* (2021-2 범주 2주차 클린업 교안을 참고했습니다)
+
+* 로지스틱 회귀 모형의 식은 다음과 같다.
+$$
+logit[\pi(x)] = log(\frac{\pi(x)}{(1 - \pi(x))}) = \beta_0 + \beta_1x_1 + ... + \beta_kx_k
+$$
+
+* 이 때 체계적 성분의 범위는 $-\infty$ 에서 $\infty$인데, 랜덤 성분인 $\pi(x) = P(Y = 1 | X = x)$는 0에서 1의 값을 가지므로 범위를 맞추기 위해 우선 오즈의 형태를 사용하여 범위를 0부터 $\infty$로 바꿔준 후, 최종적으로 log를 취해줌으로써 범위를 $-\infty$에서 $\infty$로 바꾸어 준다.
+
+* 이 때, 로지스틱 회귀 모형은 오즈비와 관련되어 있다. 로지스틱 회귀 모형에 $x$와 $x+1$을 대입해 준 후 두 식을 빼 주면 오즈비가 나오게 된다. 식으로 정리를 해 보면,
+$$
+log[\frac{\pi(x+1)}{1-\pi(x+1)}] - log[\frac{\pi(x)}{1-\pi(x)}] \\
+= (\beta_0 + \beta_1(x+1)) - (\beta_0 + \beta_1x)
+$$
+
+* 위의 식을 정리하면,
+$$
+log[\frac{\pi(x+1) / (1-\pi(x+1))}{\pi(x) /(1-\pi(x))}] = \beta \\
+\frac{\pi(x+1) / (1-\pi(x+1))}{\pi(x) /(1-\pi(x))} = e^\beta
+$$
+
+* 이는 $x+1$일 때 $Y = 1$일 오즈가 $x$일 때 $Y = 1$일 오즈보다 $e^\beta$배 높음을, 즉 다른 설명변수가 고정되어 있는 경우 $x$가 한 단위 증가할 때 $Y = 1$일 오즈가 $e^\beta$배 증가함을 의미한다.
+
+* 예를 들어, AGE가 한 단위 증가하는 경우 credit이 높을 오즈가 1.0063635배 증가한다고 해석이 가능하다.
+```{r}
+logit_model$coefficients %>% exp
+```
+
+## 문제 1-5. 0.5를 임계값으로 하여 모델의 예측값(train error) 구하고 confusion matrix 만들기
+
+### (1) 모델의 예측값(train error)
+```{r}
+train_pred <- ifelse(logit_model$fitted.values > 0.5, 1, 0) %>% as.factor
+```
+
+### (2) 혼동행렬(confusion matrix)
+```{r}
+confusionMatrix(data = train_pred, reference = train_set$credit, positive = "1")$table
+```
+
+
+## 문제 1-6. Validation data를 통해 확률값이 나오도록 예측값을 구하고 이를 이용하여 ROC curve 그리고 해석
+
+### (1) validation data의 예측값(확률값)
+```{r}
+valid_prob <- predict(logit_model, valid_set, type = "response")
+```
+
+### (2) ROC curve 그리기
+
+* ROC curve는 모든 cutoff point에 대하여 예측 검정력을 구하기 때문에 cutoff point에 따라 값이 달라지고 정보 손실이 발생하는 혼동행렬보다 더 많은 정보를 가지고 있고, 가장 적합한 cutoff point를 찾을 수 있도록 한다.
+
+* validation set의 확률값을 이용하여 그린 ROC curve에 따르면, 최적의 cutoff point는 0.590이다.
+```{r}
+ROC(valid_prob, valid_set$credit)
+```
+
+## 문제 1-7. ROC curve에서 구한 최적의 임계값을 기준으로 Accuracy와 F1-score 구하기
+
+* 최적의 cutoff point를 기준으로 분류 시행
+```{r}
+valid_pred <- ifelse(valid_prob > 0.59, 1, 0) %>% as.factor
+```
+
+* Accuracy
+```{r}
+logit_acc <- Accuracy(y_pred = valid_pred, y_true = valid_set$credit); logit_acc
+```
+
+* F1-score: MLmetrics 패키지의 F1_score() 이용
+```{r}
+logit_f1 <- F1_Score(y_true = valid_set$credit, y_pred = valid_pred, positive = "1"); logit_f1
+```
+
+* F1-score 직접 구하기: Confusion Matrix
+```{r}
+logit_cm <- confusionMatrix(data = valid_pred, reference = valid_set$credit, positive = "1")$table; logit_cm
+```
+
+* F1-score 직접 구하기: precision과 recall을 계산한 후 F1-score 구하는 공식을 이용
+```{r}
+precision <- logit_cm[2,2] / (logit_cm[2,2] + logit_cm[2,1])
+recall <- logit_cm[2,2] / (logit_cm[2,2] + logit_cm[1,2])
+
+2 / ((1/precision) + (1/recall)) # F1-score
+```
+
+## 문제 1-8. 같은 조건으로 전체 데이터에 로지스틱 회귀 모형 적합 및 test set에 대해 예측
+
+### (1) 로지스틱 회귀 모형 적합
+```{r}
+logit_model <- glm(credit ~ reality + income_total + income_type + edu_type + family_type + house_type + email + begin_month + AGE + YEARS_EMPLOYED, 
+                   family = binomial(link='logit'), 
+                   data = train)
+```
+
+### (2) test set에 대하여 예측
+```{r}
+test_prob <- predict(logit_model, test, type = "response")
+test_pred <- ifelse(test_prob > 0.59, 1, 0) %>% as.factor
+test_pred %>% head
+```
+
+## Lasso 로지스틱 회귀
+
+## 문제 2-1. 범주화 변수들이 더미화된 디자인 행렬 생성
+
+```{r}
+train_x <- model.matrix(credit~., data = train_set)[,-1] # design matrix의 intercept term 제거
+```
+
+## 문제 2-2. CV를 이용하여 최적의 람다를 찾은 후 Lasso 로지스틱 회귀 모델 적합
+
+### (1) CV를 이용하여 최적의 람다 찾기
+```{r}
+set.seed(123)
+lambda_cv_result <- cv.glmnet(train_x, y = train_set$credit, alpha = 1, family = "binomial")
+best_lambda <- lambda_cv_result$lambda.min; best_lambda
+```
+
+## (2) Lasso 로지스틱 회귀 모델 적합
+```{r}
+lasso_logit_model <- glmnet(x = train_x, y = train_set$credit, alpha = 1, family = "binomial", lambda = best_lambda)
+```
+
+## 문제 2-3. 모델의 회귀계수 확인 및 회귀계수가 없는 변수들이 존재하는 이유 설명
+
+*회귀계수가 없는 변수들이 존재하는 이유: Lasso regularization의 경우 유의하지 않은 변수들의 계수를 0으로 추정하여 변수 선택의 기능을 한다. 아래의 모델 적합에 따른 회귀계수 결과와 같이 유의하지 않은 변수들의 경우 회귀계수가 존재하지 않게 된다.
+* 따라서, 계수들을 0에 가깝게 하지만 계수를 정확히 0의 값으로 만들지는 않는 Ridge regularization과 비교해 보면, 모델의 해석력은 Ridge < Lasso가 되겠다.
+```{r}
+coef(lasso_logit_model)
+```
+
+## 문제 2-4. validation 데이터를 이용해 확률값이 나오도록 예측 후 ROC curve 그리기
+
+### (1) validation 데이터를 이용해 확률값으로 예측
+```{r}
+valid_x <-  model.matrix(credit~., data = valid_set)[,-1]
+valid_prob <- predict(lasso_logit_model, valid_x, type = "response")
+```
+
+### (2) ROC curve 그리기
+
+* ROC curve는 모든 cutoff point에 대하여 예측 검정력을 구하기 때문에 cutoff point에 따라 값이 달라지고 정보 손실이 발생하는 혼동행렬보다 더 많은 정보를 가지고 있고, 가장 적합한 cutoff point를 찾을 수 있도록 한다. (사실 앞에서 했던 설명과 동일하다ㅎㅎ)
+
+* validation set의 확률값을 이용하여 그린 ROC curve에 따르면, 최적의 cutoff point는 0.563이다.
+```{r}
+ROC(valid_prob, valid_set$credit)
+```
+
+## 문제 2-5. ROC curve에서 구한 최적의 임계값을 기준으로 Accuracy와 F1-score 구하기
+
+### (1) 최적의 임계값을 기준으로 예측
+```{r}
+valid_pred <- ifelse(valid_prob > 0.563, 1, 0) %>% as.factor
+```
+
+### (2) Accuracy
+```{r}
+lasso_logit_acc <- Accuracy(y_pred = valid_pred, y_true = valid_set$credit); lasso_logit_acc
+```
+
+### (3) F1-score
+
+* F1-score: MLmetrics 패키지의 F1_score() 이용
+```{r}
+lasso_logit_f1 <- F1_Score(y_true = valid_set$credit, y_pred = valid_pred, positive = "1"); lasso_logit_f1
+```
+
+* F1-score 직접 구하기: Confusion Matrix
+```{r}
+lasso_logit_cm <- confusionMatrix(data = valid_pred, reference = valid_set$credit, positive = "1")$table; lasso_logit_cm
+```
+
+* F1-score 직접 구하기: precision과 recall을 계산한 후 F1-score 구하는 공식을 이용
+```{r}
+precision <- lasso_logit_cm[2,2] / (lasso_logit_cm[2,2] + lasso_logit_cm[2,1])
+recall <- lasso_logit_cm[2,2] / (lasso_logit_cm[2,2] + lasso_logit_cm[1,2])
+
+2 / ((1/precision) + (1/recall)) # F1-score
+```
+
+## 문제 2-6. 같은 조건으로 전체 데이터를 이용하여 다시 Lasso 로지스틱 회귀 모형 적합 후 test set에 대해 예측
+
+### (1) 전체 데이터를 이용하여 Lasso 로지스틱 회귀 모형 적합
+
+* 전체 데이터 model.matrix() 이용하여 디자인 행렬 변환
+```{r}
+total_train_x <- model.matrix(credit ~., data = train)[,-1]
+```
+
+* Lasso 로지스틱 회귀 모형 적합
+```{r}
+lasso_logit_model <- glmnet(x = total_train_x, y = train$credit, alpha = 1, family = "binomial", lambda = best_lambda)
+```
+
+### (2) test set에 대해 예측
+
+* test 데이터 model.matrix() 이용하여 디자인 행렬 변환
+```{r}
+test_x <- model.matrix(~., data = test)[,-1]
+```
+
+* test set에 대하여 예측
+```{r}
+test_prob <- predict(lasso_logit_model, test_x, type = "response")
+test_pred <- ifelse(test_prob > 0.563, 1, 0) %>% as.factor
+test_pred %>% head
+```
+
+## Ridge 로지스틱 회귀
+
+## 문제 3-1. CV로 최적의 람다를 찾은 후 Ridge 로지스틱 회귀 모델 적합, 회귀계수 확인
+
+### (1) CV로 최적의 람다 찾기
+
+```{r}
+set.seed(123)
+lambda_cv_result <- cv.glmnet(train_x, y = train_set$credit, alpha = 0, family = "binomial")
+best_lambda <- lambda_cv_result$lambda.min; best_lambda
+```
+
+### (2) Ridge 로지스틱 회귀 모델 적합
+
+```{r}
+ridge_logit_model <- glmnet(x = train_x, y = train_set$credit, alpha = 0, family = "binomial", lambda = best_lambda)
+```
+
+### (3) 회귀계수 확인
+
+* 유의하지 않은 변수들의 계수를 0으로 만들어 변수 선택의 기능을 하는 Lasso regularization과는 달리, Ridge regression은 모델의 계수를 0에 가깝게 만들기는 하지만 그 값이 정확히 0은 아닌 것을 확인할 수 있다.
+
+* 따라서, 모델의 해석력은 Ridge < Lasso가 되겠다.
+```{r}
+coef(ridge_logit_model)
+```
+
+
+## 문제 3-2. validation 데이터를 이용해 확률값이 나오도록 예측 후 ROC curve 그리기
+
+### (1) validation 데이터를 이용해 확률값으로 예측
+
+```{r}
+valid_prob <- predict(ridge_logit_model, valid_x, type = "response")
+```
+
+### (2) ROC curve 그리기
+
+* ROC curve는 모든 cutoff point에 대하여 예측 검정력을 구하기 때문에 cutoff point에 따라 값이 달라지고 정보 손실이 발생하는 혼동행렬보다 더 많은 정보를 가지고 있고, 가장 적합한 cutoff point를 찾을 수 있도록 한다. (역시 앞에서 했던 설명과 동일하다ㅎㅎ)
+
+* validation set의 확률값을 이용하여 그린 ROC curve에 따르면, 최적의 cutoff point는 0.571이다.
+```{r}
+ROC(valid_prob, valid_set$credit)
+```
+
+## 문제 3-3. ROC curve에서 구한 최적의 임계값을 기준으로 Accuracy와 F1-score 구하기
+
+### (1) 최적의 임계값을 기준으로 예측
+
+```{r}
+valid_pred <- ifelse(valid_prob > 0.571, 1, 0) %>% as.factor
+```
+
+### (2) Accuracy
+```{r}
+ridge_logit_acc <- Accuracy(y_pred = valid_pred, y_true = valid_set$credit); ridge_logit_acc
+```
+
+### (3) F1-score
+
+* F1-score: MLmetrics 패키지의 F1_score() 이용
+```{r}
+ridge_logit_f1 <- F1_Score(y_true = valid_set$credit, y_pred = valid_pred, positive = "1"); ridge_logit_f1
+```
+
+* F1-score 직접 구하기: Confusion Matrix
+```{r}
+ridge_logit_cm <- confusionMatrix(data = valid_pred, reference = valid_set$credit, positive = "1")$table; ridge_logit_cm
+```
+
+* F1-score 직접 구하기: precision과 recall을 계산한 후 F1-score 구하는 공식을 이용
+```{r}
+precision <- ridge_logit_cm[2,2] / (ridge_logit_cm[2,2] + ridge_logit_cm[2,1])
+recall <- ridge_logit_cm[2,2] / (ridge_logit_cm[2,2] + ridge_logit_cm[1,2])
+
+2 / ((1/precision) + (1/recall)) # F1-score
+```
+
+## 문제 3-4. 같은 조건으로 전체 데이터를 이용하여 다시 Ridge 로지스틱 회귀 모형 적합 후 test set에 대해 예측
+
+### (1) 전체 데이터를 이용하여 Ridge 로지스틱 회귀 모형 적합
+
+```{r}
+ridge_logit_model <- glmnet(x = total_train_x, y = train$credit, alpha = 0, family = "binomial", lambda = best_lambda)
+```
+
+### (2) test set에 대해 예측
+
+```{r}
+test_prob <- predict(ridge_logit_model, test_x, type = "response")
+test_pred <- ifelse(test_prob > 0.571, 1, 0) %>% as.factor
+test_pred %>% head
+```
+
+## 문제 3-5. 세 모델의 Accuracy 값과 F1-score 값을 시각화 및 결과 해석
+
+### (1) 각 모델의 accuracy, F1-score 값을 담은 데이터프레임 생성
+
+```{r}
+eval_df <- data.frame(model = c("lasso", "logistic", "ridge"),
+           accuracy = c(lasso_logit_acc, logit_acc, ridge_logit_acc),
+           f1score = c(lasso_logit_f1, logit_f1, ridge_logit_f1)) %>% 
+  gather(key = "eval_method", "value", -model); eval_df
+```
+
+### (2) 시각화 및 결과 해석
+
+* Penalty(Regulatization)가 적용되지 않은 가장 기본적인 로지스틱 회귀 모형보다 Penalty(Regulatization)가 적용된 Ridge 로지스틱 회귀 모형 및 Lasso 로지스틱 회귀 모형의 Accuracy와 F1-score 지표가 더 좋은 것을 확인할 수 있다. 이 데이터셋에서는 Lasso 로지스틱 회귀 모형이 Ridge 로지스틱 회귀보다 더 좋은 Accuracy와 F1-score를 가짐을 확인할 수 있다.
+```{r}
+eval_df %>% ggplot(aes(x = model, y = value, fill = model, color = model)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  geom_text(aes(label = round(value, 2), vjust = -0.5)) +
+  facet_wrap(facets = vars(eval_method)) +
+  theme_light() +
+  scale_fill_brewer(palette = "Pastel1") +
+  scale_color_brewer(palette = "Pastel1") +
+  theme(
+    panel.grid = element_blank(),
+    strip.text = element_text(color = "black"),
+    axis.title = element_blank()
+  )
+```
+
+# Ch3. 클러스터링
+
+```{r, message = FALSE}
+library(corrplot)
+library(cluster)
+library(factoextra)
+library(gridExtra)
+```
+
+## 문제 1. xclara 데이터 불러오기
+
+```{r}
+rm(list=ls()) # 기존의 데이터 모두 삭제
+data(xclara, package="cluster")
+```
+
+## 문제 2. 데이터의 상관관계 확인 및 스케일링
+
+```{r}
+cor(xclara) # 변수가 두개라서 corrplot는 그리지 않았다
+```
+
+* 클러스터링 전에 스케일링을 해야 하는 이유: 데이터에서 각 변수의 단위, 크기는 모두 다르다. 변수의 단위가 모두 다른 상황에서, 예를 들어 두 변수 $X_1$과 $X_2$가 존재하고 $X_2$의 크기가 $X_1$에 비해 현저히 크다고 할 때(예를 들면 비율과 가격 데이터처럼? ㅎㅎ..), 스케일링을 해주지 않고 바로 클러스터링을 시행하게 되면 상대적으로 크기가 큰 $X_2$가 더 큰 영향력을 가지게 된다. 따라서, 변수의 스케일을 맞추어 주어 변수들의 영향역을 동일하게 만들어 주어야 한다. 아래에서는 평균을 0, 분산을 1로 맞추어 주는 스케일링을 시행하였다.
+```{r}
+xclara_scaled <- scale(xclara, center = TRUE, scale = TRUE) %>% as.data.frame
+```
+
+## 문젲 3. Fvix_nbclust 함수를 이용한 시각화 및 적절한 k값 선택
+
+* 적절한 k값은 3이다. k = 3이 왼쪽 그래프에서는 elbow point에 해당하고, 오른쪽 그래프에서는 가장 큰 실루엣 계수(클러스터링 시 결과의 유의성을 검증할 수 있는 0 ~ 1의 값을 갖는 지표로, 클러스터 내의 응집도가 높고 클러스터간의 분리가 잘 이루어졌을수록 1에 가까운 값을 갖는다!)를 갖기 떄문에 클러스터링 시 가장 적절한 k값이 되겠다.
+```{r}
+set.seed(123)
+
+wss_method <- fviz_nbclust(xclara_scaled, kmeans, method = "wss") # within SS
+silhouette_method <- fviz_nbclust(xclara_scaled, kmeans, method = "silhouette") # silhouette
+
+grid.arrange(wss_method, silhouette_method, ncol= 2) 
+```
+
+## 문제 4. K-means clustering 진행 및 시각화
+```{r}
+set.seed(21) # 결과 맞춰주기 위해서 그냥 시드 설정했습니다
+
+kmeans_result <- kmeans(xclara_scaled , 3, nstart = 1, iter.max = 100)
+kmeans_result$cluster <- as.factor(kmeans_result$cluster)
+
+fviz_cluster(kmeans_result, data = xclara_scaled, label = NA) +
+  theme_minimal()
+```
+
+
+## 문제 5. 두 변수 V1, V2에 대해 클러스터별로 박스 플랏 시각화
+* 클러스터 1은 V1의 값이 대체로 높고, V2의 값이 대체로 낮다. 클러스터 2는 V1의 값은 중간 정도이지만, 대체로 높은 V2값을 가진다. 마지막으로, 클러스터 3은 가장 낮은 V1 값을 가지고, 중간정도의 V2의 값을 가진다.
+```{r}
+cluster_data <- xclara %>% mutate(cluster = kmeans_result$cluster)
+
+V1_plt <-cluster_data %>% 
+  ggplot(aes(x = cluster, y = V1, group = cluster, fill = cluster, color = cluster)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5, lwd = 0.3) +
+  stat_boxplot(geom = "errorbar", lwd = 0.3) +
+  theme_classic() +
+  theme(
+    legend.position = "none"
+  )
+
+V2_plt <-cluster_data %>% 
+  ggplot(aes(x = cluster, y = V2, group = cluster, fill = cluster, color = cluster)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5, lwd = 0.3) +
+  stat_boxplot(geom = "errorbar", lwd = 0.3) +
+  theme_classic() +
+  theme(
+    legend.position = "none"
+  )
+
+grid.arrange(V1_plt, V2_plt, ncol = 2)
+```
